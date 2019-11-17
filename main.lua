@@ -12,6 +12,7 @@ check = false
 
 P_USER = 1
 P_BOT = 2 --do not use
+P_NETWORK = 3
 
 A_BEGINX = 1
 A_BEGINY = 2
@@ -79,6 +80,9 @@ piecesQuad =
 	{nil, nil, nil, nil, nil, nil, nil}
 }
 
+network = false
+isServer = false
+
 function love.load(arg)
 	love.graphics.setDefaultFilter("nearest","nearest")
 	pieces = love.graphics.newImage("default.png")
@@ -100,35 +104,79 @@ function love.load(arg)
 		end
 	end
 	love.graphics.setCanvas()
+	
+	if arg[1] == "-server" then players[2] = P_NETWORK end
+	if arg[1] == "-client" then players[1] = P_NETWORK end
+	
+	if players[1] == P_NETWORK or players[2] == P_NETWORK then
+		network = true
+		isServer = players[2] == P_NETWORK
+		isClient = players[1] == P_NETWORK
+		
+		if isServer and isClient then error("Both players are networks. This is probably bad and I don't want to know the consequences of this so I made it so that it crashed.") end
+		
+		if isServer then
+			server_thread = love.thread.newThread("server.lua")
+			server_thread:start()
+		elseif isClient then
+			client_thread = love.thread.newThread("client.lua")
+			client_thread:start()
+		end
+		network_s_channel = love.thread.getChannel("send")
+		network_r_channel = love.thread.getChannel("receive")
+		if isClient then
+			network_s_channel:push(arg[2])
+		end
+	end
+	
 	love.window.setTitle("Techno's Chess - White plays...")
 end
 
 function love.update(dt)
-	if pawnPromotion and pawnPromotionAnim < animationTime then
-		pawnPromotionAnim = pawnPromotionAnim + dt
-	end
-	for i, animation in ipairs(animations) do
-		animation[A_TIME] = animation[A_TIME] + dt
-		if animation[A_TIME] > animationTime then
-			table.remove(animations, i)
+	if isServer and not connected then
+		local v = network_r_channel:pop()
+		if v == true then
+			connected = true
 		end
-	end
-	if players[turn] == P_BOT then
-		botWaitTime = botWaitTime + dt
-		if botWaitTime >= botWaitTimeMax then
-			botWaitTime = 0
-			for by = boardHeight, 1, -1 do
-				for bx = 1, boardWidth do
-					if board[bx][by][B_TYPE] ~= T_EMPTY and board[bx][by][B_TEAM] == turn then
-						for ey = boardHeight, 1, -1 do
-							for ex = 1, boardWidth do
-								if doMove(bx,by,ex,ey) then
-									if pawnPromotion then doPawnPromotion(T_QUEEN) end
-									return
+	else
+		if pawnPromotion and pawnPromotionAnim < animationTime then
+			pawnPromotionAnim = pawnPromotionAnim + dt
+		end
+		for i, animation in ipairs(animations) do
+			animation[A_TIME] = animation[A_TIME] + dt
+			if animation[A_TIME] > animationTime then
+				table.remove(animations, i)
+			end
+		end
+		if players[turn] == P_BOT then
+			botWaitTime = botWaitTime + dt
+			if botWaitTime >= botWaitTimeMax then
+				botWaitTime = 0
+				for by = boardHeight, 1, -1 do
+					for bx = 1, boardWidth do
+						if board[bx][by][B_TYPE] ~= T_EMPTY and board[bx][by][B_TEAM] == turn then
+							for ey = boardHeight, 1, -1 do
+								for ex = 1, boardWidth do
+									if doMove(bx,by,ex,ey) then
+										if pawnPromotion then doPawnPromotion(T_QUEEN) end
+										return
+									end
 								end
 							end
 						end
 					end
+				end
+			end
+		elseif players[turn] == P_NETWORK then
+			local bx = network_r_channel:pop()
+			if bx then
+				local by = network_r_channel:pop()
+				local ex = network_r_channel:pop()
+				local ey = network_r_channel:pop()
+				local promotion = network_r_channel:pop()
+				doMove(bx,by,ex,ey)
+				if promotion then
+					doPawnPromotion(network_r_channel:pop())
 				end
 			end
 		end
@@ -215,44 +263,46 @@ function love.draw()
 end
 
 function love.mousepressed(x, y)
-	if players[turn] == P_USER then
-		local sw = love.graphics.getWidth() / boardWidth
-		local sh = love.graphics.getHeight() / boardHeight
-		local s = math.min(sw,sh)
-		if s == sw then
-			y = y - (love.graphics.getHeight()-love.graphics.getWidth())/2
-		elseif s == sh then
-			x = x - (love.graphics.getWidth()-love.graphics.getHeight())/2
-		end
-		if not pawnPromotion then
-			x = math.floor(x / s)+1
-			y = math.floor(-y / s)+1+boardHeight
-			if x > 0 and x <= boardWidth and y > 0 and y <= boardHeight then
-				if board[x][y][B_TYPE] > 1 and board[x][y][B_TEAM] == turn then
-					selected = {x,y}
-				else
-					if selected[1] ~= nil then
-						doMove(selected[1],selected[2],x,y)
-						selected = {nil,nil}
+	if not (isServer and not connected) then
+		if players[turn] == P_USER then
+			local sw = love.graphics.getWidth() / boardWidth
+			local sh = love.graphics.getHeight() / boardHeight
+			local s = math.min(sw,sh)
+			if s == sw then
+				y = y - (love.graphics.getHeight()-love.graphics.getWidth())/2
+			elseif s == sh then
+				x = x - (love.graphics.getWidth()-love.graphics.getHeight())/2
+			end
+			if not pawnPromotion then
+				x = math.floor(x / s)+1
+				y = math.floor(-y / s)+1+boardHeight
+				if x > 0 and x <= boardWidth and y > 0 and y <= boardHeight then
+					if board[x][y][B_TYPE] > 1 and board[x][y][B_TEAM] == turn then
+						selected = {x,y}
+					else
+						if selected[1] ~= nil then
+							doMove(selected[1],selected[2],x,y)
+							selected = {nil,nil}
+						end
 					end
 				end
-			end
-		else
-			local ppx = math.min(boardWidth - 0.75,math.max(1.75, pawnPromotionX))-1
-			local ppy = -math.min(boardHeight - 0.75,math.max(1.75, pawnPromotionY))+boardHeight
-			x = x / s
-			y = y / s
-			if y > ppy-0.75 and y < ppy-0.75+1 then
-				if x > ppx-0.75 and x < ppx-0.75+1 then
-					doPawnPromotion(T_ROOK)
-				elseif x > ppx+0.75 and x < ppx+0.75+1 then
-					doPawnPromotion(T_KNIGHT)
-				end
-			elseif y > ppy+0.75 and y < ppy+0.75+1 then
-				if x > ppx-0.75 and x < ppx-0.75+1 then
-					doPawnPromotion(T_BISHOP)
-				elseif x > ppx+0.75 and x < ppx+0.75+1 then
-					doPawnPromotion(T_QUEEN)
+			else
+				local ppx = math.min(boardWidth - 0.75,math.max(1.75, pawnPromotionX))-1
+				local ppy = -math.min(boardHeight - 0.75,math.max(1.75, pawnPromotionY))+boardHeight
+				x = x / s
+				y = y / s
+				if y > ppy-0.75 and y < ppy-0.75+1 then
+					if x > ppx-0.75 and x < ppx-0.75+1 then
+						doPawnPromotion(T_ROOK)
+					elseif x > ppx+0.75 and x < ppx+0.75+1 then
+						doPawnPromotion(T_KNIGHT)
+					end
+				elseif y > ppy+0.75 and y < ppy+0.75+1 then
+					if x > ppx-0.75 and x < ppx-0.75+1 then
+						doPawnPromotion(T_BISHOP)
+					elseif x > ppx+0.75 and x < ppx+0.75+1 then
+						doPawnPromotion(T_QUEEN)
+					end
 				end
 			end
 		end
@@ -282,6 +332,15 @@ function doMove(bx, by, ex, ey)
 				end
 			else
 				pgn = pgn .. " "
+			end
+			if network and players[turn] ~= P_NETWORK then
+				network_s_channel:push(bx)
+				network_s_channel:push(by)
+				network_s_channel:push(ex)
+				network_s_channel:push(ey)
+				network_s_channel:push(pawnPromotion)
+			end
+			if not pawnPromotion then
 				doTurn()
 			end
 		end
@@ -313,6 +372,9 @@ function doPawnPromotion(pawn)
 		pawnPromotion = false
 		updateBuffer()
 		checkForCheck(pawnPromotionX, pawnPromotionY, false, getKing(board[pawnPromotionX][pawnPromotionY][B_TEAM]))
+		if network and players[turn] ~= P_NETWORK then
+			network_s_channel:push(pawn)
+		end
 		doTurn()
 	end
 end

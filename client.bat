@@ -1,0 +1,1 @@
+"C:\Program Files\LOVE\lovec.exe" . -client 192.168.1.80
