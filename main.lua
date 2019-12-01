@@ -1,3 +1,10 @@
+require('src/help')
+
+-- Global technochess data
+tc = {
+	help = Help:new()
+}
+
 boardWidth = 8
 boardHeight = 8
 turn = 1
@@ -183,7 +190,18 @@ function love.update(dt)
 	end
 end
 
+-- Draw main loop
 function love.draw()
+	if Help.draw(tc.help) then
+		return true
+	end
+
+	displayBoard()
+end
+
+function displayBoard()
+	love.graphics.push()
+
 	local sw = love.graphics.getWidth() / boardWidth
 	local sh = love.graphics.getHeight() / boardHeight
 	local s = math.min(sw,sh)
@@ -260,6 +278,8 @@ function love.draw()
 		love.graphics.draw(pieces, piecesQuad[board[pawnPromotionX][pawnPromotionY][B_TEAM]][T_QUEEN],ppx+0.75,ppy+0.75,0,1/(pieces:getWidth()/T_COUNT),1/(pieces:getHeight()/2))
 		
 	end
+
+	love.graphics.pop()
 end
 
 function love.mousepressed(x, y)
@@ -403,6 +423,8 @@ function love.keypressed(key)
 		file:write(pgn)
 		file:flush()
 		file:close()
+	else
+		Help.toggle(tc.help)
 	end
 end
 

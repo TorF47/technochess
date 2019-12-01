@@ -1,0 +1,7 @@
+
+  technochess - help
+
+* Press S to save the current game into a PGN file.
+Get your PGN files in `%appdata%\LOVE\technochess`.
+
+* Press any other key to display this help message.
